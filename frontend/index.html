@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skill-to-Job Matcher</title>
+<style>
+:root{--bg:#08130F;--surface:rgba(15,31,25,.9);--raised:#162A22;--line:#21392F;
+  --text:#E6F4EC;--muted:#8FAA9C;--accent:#2DD4BF;--accent-ink:#06130E;
+  --good:#A3E635;--good-bg:rgba(163,230,53,.12);--bad:#FB7185;--bad-bg:rgba(251,113,133,.12)}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;color:var(--text);background-color:var(--bg);
+  background-image:linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
+  background-size:48px 48px;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5}
+#fx{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+.streak{position:absolute;top:-140px;width:1px;height:90px;opacity:.55;
+  background:linear-gradient(to bottom,transparent,var(--c));animation:fall linear infinite}
+.streak::after{content:"";position:absolute;bottom:-2px;left:-2px;width:5px;height:5px;border-radius:50%;background:var(--c)}
+main{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:48px 20px 64px}
+h1{margin:0 0 10px;font-size:clamp(32px,6vw,46px);letter-spacing:-.02em;line-height:1.1}
+.sub{margin:0 0 28px;max-width:560px;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:28px 24px;
+  backdrop-filter:blur(8px);animation:enter .3s ease-out both}
+h2{margin:0 0 4px;font-size:18px}
+.hint{margin:0 0 16px;color:var(--muted);font-size:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+input{flex:1;min-width:200px;background:var(--raised);border:1px solid var(--line);border-radius:10px;
+  color:var(--text);padding:12px 14px;font:inherit;transition:border-color .15s,box-shadow .15s}
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(45,212,191,.2)}
+.btn{background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:700;border:0;border-radius:10px;
+  padding:12px 22px;cursor:pointer;transition:filter .15s,transform .1s}
+.btn:hover{filter:brightness(1.1)}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.6;cursor:wait}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{background:var(--raised);border:1px solid var(--line);border-radius:10px;color:var(--text);
+  font:inherit;font-size:14px;font-weight:600;padding:7px 12px;cursor:pointer;
+  transition:border-color .15s,background .15s,transform .1s}
+.chip:hover{border-color:var(--accent)}
+.chip:active{transform:scale(.96)}
+.chip.on{border-color:var(--accent);background:rgba(45,212,191,.14)}
+.err{margin:16px 0 0;padding:10px 14px;border-radius:10px;background:var(--bad-bg);color:var(--bad);
+  animation:shake .4s}
+#results{margin-top:24px}
+.summary{margin:0 0 12px;color:var(--muted);font-size:14px}
+.job{background:var(--raised);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:10px;
+  animation:rise .3s both;animation-delay:calc(var(--i)*50ms)}
+.job-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.job-title{font-weight:700}
+.job-co{color:var(--muted);font-size:14px}
+.pct{font-size:22px;font-weight:800;color:var(--c)}
+.bar{height:6px;background:#21392F;border-radius:4px;margin:12px 0;overflow:hidden}
+.bar i{display:block;height:100%;width:0;border-radius:4px;background:var(--c);
+  transition:width .8s cubic-bezier(.2,.8,.2,1)}
+.hi{--c:var(--good)}
+.mid{--c:var(--accent)}
+.lo{--c:var(--muted)}
+.tags{display:flex;flex-wrap:wrap;gap:6px;font-size:13px}
+.tag{border-radius:6px;padding:2px 8px;background:var(--bad-bg);color:var(--bad)}
+.tag.ok{background:var(--good-bg);color:var(--good)}
+.label{color:var(--muted);margin-right:2px}
+.foot{margin:24px 0 0;color:var(--muted);font-size:13px;text-align:center}
+@keyframes enter{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-7px)}50%{transform:translateX(7px)}75%{transform:translateX(-4px)}}
+@keyframes fall{from{transform:translateY(0)}to{transform:translateY(calc(100vh + 240px))}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="fx" aria-hidden="true"></div>
+<main>
+<h1>Skill-to-Job Matcher</h1>
+<p class="sub">Enter the skills you have and see which jobs fit you best, with a match score and the skills you are still missing.</p>
+<div class="card">
+<h2>Your skills</h2>
+<p class="hint">Separate skills with commas, or tap the suggestions below.</p>
+<div class="row">
+<input id="skills" type="text" placeholder="python, docker, sql" autocomplete="off" aria-label="Your skills">
+<button id="go" class="btn" type="button">Find jobs</button>
+</div>
+<div id="suggest" class="chips"></div>
+<p id="msg" class="err" role="alert" hidden></p>
+<div id="results" aria-live="polite"></div>
+</div>
+<p class="foot">Flask · PostgreSQL · Docker · Terraform · EKS · Helm · GitHub Actions · SonarQube</p>
+</main>
+<script>
+const SUGGESTIONS = ["python", "docker", "kubernetes", "aws", "terraform", "linux", "git", "jenkins", "sql", "bash", "ansible", "helm"];
+const input = document.getElementById("skills");
+const goBtn = document.getElementById("go");
+const msg = document.getElementById("msg");
+const results = document.getElementById("results");
+const suggest = document.getElementById("suggest");
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function parseSkills() {
+  return input.value.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+}
+
+function syncChips() {
+  const have = new Set(parseSkills());
+  for (const chip of suggest.children) {
+    chip.classList.toggle("on", have.has(chip.dataset.skill));
+  }
+}
+
+function toggleSkill(skill) {
+  const have = parseSkills();
+  const next = have.includes(skill) ? have.filter(s => s !== skill) : [...have, skill];
+  input.value = next.join(", ");
+  syncChips();
+}
+
+for (const skill of SUGGESTIONS) {
+  const chip = el("button", "chip", skill);
+  chip.type = "button";
+  chip.dataset.skill = skill;
+  chip.addEventListener("click", () => toggleSkill(skill));
+  suggest.appendChild(chip);
+}
+input.addEventListener("input", syncChips);
+
+function scoreClass(percent) {
+  if (percent >= 70) return "hi";
+  if (percent >= 40) return "mid";
+  return "lo";
+}
+
+function renderJob(job, index) {
+  const card = el("div", "job " + scoreClass(job.match_percent));
+  card.style.setProperty("--i", index);
+  const top = el("div", "job-top");
+  const info = el("div");
+  info.append(el("div", "job-title", job.title), el("div", "job-co", job.company));
+  top.append(info, el("div", "pct", job.match_percent + "%"));
+  const bar = el("div", "bar");
+  const fill = document.createElement("i");
+  bar.appendChild(fill);
+  const tags = el("div", "tags");
+  if (job.missing_skills.length === 0) {
+    tags.appendChild(el("span", "tag ok", "You have every required skill"));
+  } else {
+    tags.appendChild(el("span", "label", "Missing:"));
+    for (const skill of job.missing_skills) tags.appendChild(el("span", "tag", skill));
+  }
+  card.append(top, bar, tags);
+  setTimeout(() => { fill.style.width = job.match_percent + "%"; }, 60 + index * 50);
+  return card;
+}
+
+function renderResults(rows, skills) {
+  results.replaceChildren(el("p", "summary", rows.length + " jobs ranked for: " + skills.join(", ")));
+  rows.forEach((job, index) => results.appendChild(renderJob(job, index)));
+}
+
+async function match() {
+  msg.hidden = true;
+  const skills = parseSkills();
+  if (skills.length === 0) {
+    msg.textContent = "Please enter at least one skill";
+    msg.hidden = false;
+    return;
+  }
+  goBtn.disabled = true;
+  goBtn.textContent = "Matching...";
+  try {
+    const res = await fetch("/api/match", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skills })
+    });
+    if (!res.ok) throw new Error("Server error " + res.status);
+    renderResults(await res.json(), skills);
+  } catch (e) {
+    msg.textContent = "Error: " + e.message;
+    msg.hidden = false;
+  } finally {
+    goBtn.disabled = false;
+    goBtn.textContent = "Find jobs";
+  }
+}
+
+goBtn.addEventListener("click", match);
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter") match();
+});
+
+function startStreaks() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const fx = document.getElementById("fx");
+  const colors = ["#2DD4BF", "#A3E635", "#2DD4BF"];
+  for (let i = 0; i < 14; i++) {
+    const streak = el("span", "streak");
+    streak.style.left = (i * 37 + 11) % 100 + "%";
+    streak.style.setProperty("--c", colors[i % colors.length]);
+    streak.style.animationDuration = 8 + (i * 5) % 9 + "s";
+    streak.style.animationDelay = "-" + (i * 7) % 12 + "s";
+    fx.appendChild(streak);
+  }
+}
+startStreaks();
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+backend:
+  image:
+    repository: ""
+    tag: ""
+  replicas: 2
+  port: 5000
+
+frontend:
+  image:
+    repository: ""
+    tag: ""
+  replicas: 2
+
+db:
+  host: ""
+  name: jobsdb
+  user: jobs_user
+  secretName: db-credentials
+  initConfigMap: db-init
+
+networkPolicy:
+  enabled: true
+  rdsCidrs:
+    - 10.0.10.0/24
+    - 10.0.11.0/24

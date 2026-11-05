@@ -1,0 +1,109 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt pytest pytest-cov
+      - name: Run unit tests with coverage
+        env:
+          PYTHONPATH: backend
+        run: python -m pytest backend/tests -v --cov=backend --cov-report=xml
+      - name: SonarQube Cloud scan
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build backend image
+        run: docker build -t backend:ci backend
+      - name: Build frontend image
+        run: docker build -t frontend:ci frontend
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ap-south-1
+      CLUSTER: skill-job-matcher-eks
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN || secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Check cluster exists
+        id: cluster
+        run: |
+          if aws eks describe-cluster --name "$CLUSTER" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::EKS cluster does not exist, deploy skipped"
+          fi
+      - name: Login to ECR
+        if: steps.cluster.outputs.exists == 'true'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push images
+        if: steps.cluster.outputs.exists == 'true'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          for NAME in backend frontend; do
+            if aws ecr describe-images --repository-name "skill-job-matcher/$NAME" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+              echo "$NAME:$TAG already in ECR, skipping push"
+            else
+              docker build -t "$REGISTRY/skill-job-matcher/$NAME:$TAG" "$NAME"
+              docker push "$REGISTRY/skill-job-matcher/$NAME:$TAG"
+            fi
+          done
+      - name: Deploy with Helm
+        if: steps.cluster.outputs.exists == 'true'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER"
+          RDS_HOST=$(aws rds describe-db-instances --db-instance-identifier skill-job-matcher-db --query 'DBInstances[0].Endpoint.Address' --output text)
+          helm upgrade --install skill ./helm/skill-job-matcher \
+            --set db.host="$RDS_HOST" \
+            --set backend.image.repository="$REGISTRY/skill-job-matcher/backend" --set backend.image.tag="$TAG" \
+            --set frontend.image.repository="$REGISTRY/skill-job-matcher/frontend" --set frontend.image.tag="$TAG" \
+            --wait --timeout 5m
+      - name: Smoke test
+        if: steps.cluster.outputs.exists == 'true'
+        run: |
+          LB=$(kubectl get svc frontend -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://$LB/" || true)
+            [ "$code" = "200" ] && break
+            sleep 10
+          done
+          curl -sf "http://$LB/api/health"
+          curl -sf -X POST "http://$LB/api/match" -H 'Content-Type: application/json' -d '{"skills":["python","docker","sql"]}' | grep -q match_percent

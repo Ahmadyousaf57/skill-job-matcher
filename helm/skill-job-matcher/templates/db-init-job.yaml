@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-init
+  annotations:
+    "helm.sh/hook": post-install
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: postgres:16-alpine
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.secretName }}
+                  key: DB_PASSWORD
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              export PGHOST="$DB_HOST" PGDATABASE="$DB_NAME" PGUSER="$DB_USER" PGSSLMODE=require
+              if psql -tAc "SELECT to_regclass('public.jobs')" | grep -q jobs; then
+                echo "jobs table already exists, skipping init"
+              else
+                psql -v ON_ERROR_STOP=1 -f /init/init.sql
+              fi
+          volumeMounts:
+            - name: init
+              mountPath: /init
+      volumes:
+        - name: init
+          configMap:
+            name: {{ .Values.db.initConfigMap }}
