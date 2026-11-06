@@ -9,3 +9,4 @@ __pycache__/
 backend.hcl
 .coverage
 coverage.xml
+*.log
