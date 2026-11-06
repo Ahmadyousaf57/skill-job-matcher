@@ -32,6 +32,7 @@ data "aws_iam_policy_document" "github_trust" {
       variable = "token.actions.githubusercontent.com:sub"
       values = [
         "repo:${local.github_repo}:ref:refs/heads/main",
+        "repo:Ahmadyousaf57@149003269/skill-job-matcher@1447211114:ref:refs/heads/main",
       ]
     }
   }
